@@ -1,8 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "./supabaseClient";
-
-const TABLE_NAME = "ncr_reports";
-const PHOTO_BUCKET = "ncr-photos";
 
 const issueOptions = {
   Windows: [
@@ -52,46 +49,34 @@ const issueOptions = {
   ],
 };
 
-const emptyForm = {
-  date_issue_occurred: "",
-  department: "",
-  job_order_number: "",
-  production_area: "",
-  qty_affected: "",
-  description: "",
-  action_taken: "",
-  disposition: "",
-  assigned_to: "",
-  follow_up_date: "",
-  qc_verification: "",
-};
-
-function normalizeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function formatDate(value) {
-  if (!value) return "—";
-  return String(value).slice(0, 10);
-}
-
 function App() {
   const [view, setView] = useState("form");
-  const [selectedArea, setSelectedArea] = useState("");
-  const [selectedIssues, setSelectedIssues] = useState([]);
-  const [photos, setPhotos] = useState([]);
-  const [formData, setFormData] = useState(emptyForm);
-  const [submitting, setSubmitting] = useState(false);
-  const [submittedNcr, setSubmittedNcr] = useState(null);
   const [ncrs, setNcrs] = useState([]);
   const [loadingNcrs, setLoadingNcrs] = useState(false);
   const [selectedNcr, setSelectedNcr] = useState(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editData, setEditData] = useState({});
+  const [selectedArea, setSelectedArea] = useState("");
+  const [selectedIssues, setSelectedIssues] = useState([]);
+  const [photos, setPhotos] = useState([]);
+  const [formData, setFormData] = useState({
+    date_issue_occurred: "",
+    department: "",
+    job_order_number: "",
+    production_area: "",
+    qty_affected: "",
+    description: "",
+    action_taken: "",
+    disposition: "",
+    assigned_to: "",
+    follow_up_date: "",
+    qc_verification: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [submittedNcr, setSubmittedNcr] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [areaFilter, setAreaFilter] = useState("All");
-  const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState({});
-  const [lastError, setLastError] = useState("");
 
   useEffect(() => {
     if (view === "dashboard") {
@@ -99,42 +84,9 @@ function App() {
     }
   }, [view]);
 
-  const filteredNcrs = useMemo(() => {
-    const search = searchTerm.trim().toLowerCase();
-
-    return ncrs.filter((ncr) => {
-      const matchesSearch =
-        !search ||
-        ncr.ncr_number?.toLowerCase().includes(search) ||
-        ncr.department?.toLowerCase().includes(search) ||
-        ncr.assigned_to?.toLowerCase().includes(search) ||
-        ncr.issue_area?.toLowerCase().includes(search) ||
-        ncr.job_order_number?.toLowerCase().includes(search);
-
-      const matchesStatus = statusFilter === "All" || ncr.status === statusFilter;
-      const matchesArea = areaFilter === "All" || ncr.issue_area === areaFilter;
-
-      return matchesSearch && matchesStatus && matchesArea;
-    });
-  }, [ncrs, searchTerm, statusFilter, areaFilter]);
-
-  function printSelectedNcr() {
-    window.print();
-  }
-
-  function showError(message, error) {
-    console.error(message, error);
-    const detail = error?.message || error?.error_description || JSON.stringify(error, null, 2);
-    setLastError(`${message}\n\n${detail}`);
-    alert(`${message}. Check details on screen or console.`);
-  }
-
-  function updateField(field, value) {
-    setFormData((current) => ({
-      ...current,
-      [field]: value,
-    }));
-  }
+ function printSelectedNcr() {
+  window.print();
+}
 
   function toggleIssue(issue) {
     setSelectedIssues((current) =>
@@ -144,30 +96,46 @@ function App() {
     );
   }
 
+  function updateField(field, value) {
+    setFormData((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
   function resetForm() {
     setSelectedArea("");
     setSelectedIssues([]);
     setPhotos([]);
-    setFormData(emptyForm);
-    setSubmittedNcr(null);
+    setFormData({
+      date_issue_occurred: "",
+      department: "",
+      job_order_number: "",
+      production_area: "",
+      qty_affected: "",
+      description: "",
+      action_taken: "",
+      disposition: "",
+      assigned_to: "",
+      follow_up_date: "",
+      qc_verification: "",
+    });
+    setSubmittedNcr("");
     setSelectedNcr(null);
-    setIsEditing(false);
-    setEditData({});
-    setLastError("");
     setView("form");
   }
 
   async function loadNcrs() {
     setLoadingNcrs(true);
-    setLastError("");
 
     const { data, error } = await supabase
-      .from(TABLE_NAME)
+      .from("ncr_reports")
       .select("*")
       .order("created_at", { ascending: false });
 
     if (error) {
-      showError("Error loading NCRs", error);
+      console.error(error);
+      alert("Error loading NCRs.");
       setLoadingNcrs(false);
       return;
     }
@@ -180,132 +148,41 @@ function App() {
     const uploadedUrls = [];
 
     for (const photo of photos) {
-      const extension = photo.name.includes(".") ? photo.name.split(".").pop() : "jpg";
-      const cleanNcrNumber = ncrNumber || `ncr-${Date.now()}`;
-      const fileName = `${cleanNcrNumber}/${Date.now()}-${Math.random()
+      const fileExt = photo.name.split(".").pop();
+      const fileName = `${ncrNumber}/${Date.now()}-${Math.random()
         .toString(36)
-        .slice(2)}.${extension}`;
+        .substring(2)}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
-        .from(PHOTO_BUCKET)
-        .upload(fileName, photo, {
-          cacheControl: "3600",
-          upsert: false,
-        });
+        .from("ncr-photos")
+        .upload(fileName, photo);
 
       if (uploadError) {
+        console.error(uploadError);
         throw uploadError;
       }
 
-      const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(fileName);
+      const { data } = supabase.storage
+        .from("ncr-photos")
+        .getPublicUrl(fileName);
+
       uploadedUrls.push(data.publicUrl);
     }
 
     return uploadedUrls;
   }
 
-  async function submitNcr() {
-    if (!selectedArea) {
-      alert("Please select an area.");
-      return;
-    }
-
-    if (selectedIssues.length === 0) {
-      alert("Please select at least one issue.");
-      return;
-    }
-
-    setSubmitting(true);
-    setLastError("");
-
-    const payload = {
-      date_issue_occurred: formData.date_issue_occurred || null,
-      department: formData.department.trim(),
-      job_order_number: formData.job_order_number.trim(),
-      production_area: formData.production_area.trim(),
-      shift: "Day",
-      qty_affected: formData.qty_affected ? Number(formData.qty_affected) : null,
-      issue_area: selectedArea,
-      issue_types: selectedIssues,
-      description: formData.description.trim(),
-      action_taken: formData.action_taken.trim(),
-      disposition: formData.disposition,
-      assigned_to: formData.assigned_to,
-      follow_up_date: formData.follow_up_date || null,
-      qc_verification: formData.qc_verification,
-      status: "Open",
-    };
-
-    const { data, error } = await supabase
-      .from(TABLE_NAME)
-      .insert(payload)
-      .select()
-      .single();
-
-    if (error) {
-      showError("Error submitting NCR", error);
-      setSubmitting(false);
-      return;
-    }
-
-    let finalNcr = data;
-
-    if (photos.length > 0) {
-      try {
-        const photoUrls = await uploadPhotos(data.ncr_number);
-
-        const { data: updatedData, error: updateError } = await supabase
-          .from(TABLE_NAME)
-          .update({ photo_urls: photoUrls })
-          .eq("id", data.id)
-          .select()
-          .single();
-
-        if (updateError) {
-          showError("NCR saved, but photo links were not saved", updateError);
-        } else {
-          finalNcr = updatedData;
-        }
-      } catch (photoError) {
-        showError("NCR saved, but photo upload failed", photoError);
-      }
-    }
-
-    setSubmitting(false);
-    setSubmittedNcr(finalNcr);
-  }
-
-  function openDashboard() {
-    setView("dashboard");
-    setSelectedNcr(null);
-    setIsEditing(false);
-    setEditData({});
-    setSubmittedNcr(null);
-    setLastError("");
-  }
-
-  function openForm() {
-    setView("form");
-    setSelectedNcr(null);
-    setIsEditing(false);
-    setEditData({});
-    setSubmittedNcr(null);
-    setLastError("");
-  }
-
+  
   function startEditing() {
-    if (!selectedNcr) return;
-
     setEditData({
       department: selectedNcr.department || "",
       job_order_number: selectedNcr.job_order_number || "",
       production_area: selectedNcr.production_area || "",
-      qty_affected: selectedNcr.qty_affected ?? "",
+      qty_affected: selectedNcr.qty_affected || "",
       disposition: selectedNcr.disposition || "",
       assigned_to: selectedNcr.assigned_to || "",
-      follow_up_date: formatDate(selectedNcr.follow_up_date) === "—" ? "" : formatDate(selectedNcr.follow_up_date),
+      follow_up_date: selectedNcr.follow_up_date || "",
       qc_verification: selectedNcr.qc_verification || "",
-      status: selectedNcr.status || "Open",
       description: selectedNcr.description || "",
       action_taken: selectedNcr.action_taken || "",
     });
@@ -321,48 +198,129 @@ function App() {
   }
 
   async function saveNcrChanges() {
-    if (!selectedNcr?.id) return;
-
-    const payload = {
-      ...editData,
-      qty_affected: editData.qty_affected === "" ? null : Number(editData.qty_affected),
-      follow_up_date: editData.follow_up_date || null,
-    };
-
-    const { data, error } = await supabase
-      .from(TABLE_NAME)
-      .update(payload)
-      .eq("id", selectedNcr.id)
-      .select()
-      .single();
+    const { error } = await supabase
+      .from("ncr_reports")
+      .update(editData)
+      .eq("id", selectedNcr.id);
 
     if (error) {
-      showError("Error saving NCR changes", error);
+      console.error(error);
+      alert("Error saving NCR changes.");
       return;
     }
 
-    setSelectedNcr(data);
-    setNcrs((current) => current.map((ncr) => (ncr.id === data.id ? data : ncr)));
+    const updatedNcr = {
+      ...selectedNcr,
+      ...editData,
+    };
+
+    setSelectedNcr(updatedNcr);
+
+    setNcrs((current) =>
+      current.map((ncr) =>
+        ncr.id === selectedNcr.id ? updatedNcr : ncr
+      )
+    );
+
     setIsEditing(false);
     alert("NCR updated successfully.");
   }
 
+async function submitNcr() {
+    if (!selectedArea) {
+      alert("Please select an area.");
+      return;
+    }
+
+    if (selectedIssues.length === 0) {
+      alert("Please select at least one issue.");
+      return;
+    }
+
+    setSubmitting(true);
+
+    const payload = {
+      date_issue_occurred: formData.date_issue_occurred || null,
+      department: formData.department,
+      job_order_number: formData.job_order_number,
+      production_area: formData.production_area,
+      shift: "Day",
+      qty_affected: formData.qty_affected ? Number(formData.qty_affected) : null,
+      issue_area: selectedArea,
+      issue_types: selectedIssues,
+      description: formData.description,
+      action_taken: formData.action_taken,
+      disposition: formData.disposition,
+      assigned_to: formData.assigned_to,
+      follow_up_date: formData.follow_up_date || null,
+      qc_verification: formData.qc_verification,
+      status: "Open",
+    };
+
+    const { data, error } = await supabase
+      .from("ncr_reports")
+      .insert(payload)
+      .select()
+      .single();
+
+    if (error) {
+      console.error(error);
+      alert("Error submitting NCR. Check console.");
+      setSubmitting(false);
+      return;
+    }
+
+    if (photos.length > 0) {
+      try {
+        const photoUrls = await uploadPhotos(data.ncr_number);
+
+        const { error: updateError } = await supabase
+          .from("ncr_reports")
+          .update({ photo_urls: photoUrls })
+          .eq("id", data.id);
+
+        if (updateError) {
+          console.error(updateError);
+          alert("NCR saved, but photo links were not saved.");
+        }
+      } catch (photoError) {
+        console.error(photoError);
+        alert("NCR saved, but photo upload failed.");
+      }
+    }
+
+    setSubmitting(false);
+    setSubmittedNcr(data.ncr_number);
+  }
+
   if (submittedNcr) {
     return (
-      <div className="app-main">
-        <div className="card success-card">
-          <div className="success-icon">✅</div>
-          <h1>NCR Submitted</h1>
-          <h2>{submittedNcr.ncr_number}</h2>
-          <p>The report has been saved to Supabase.</p>
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
+        <div className="bg-white rounded-2xl shadow-xl p-10 max-w-xl w-full text-center">
+          <div className="text-5xl mb-4">✅</div>
+          <h1 className="text-3xl font-bold text-green-700 mb-2">
+            NCR Submitted
+          </h1>
+          <p className="text-xl font-semibold mb-6">{submittedNcr}</p>
+          <p className="text-gray-600 mb-8">
+            The report and photos have been saved to Supabase.
+          </p>
 
-          {lastError && <div className="error-box">{lastError}</div>}
-
-          <div className="nav-buttons" style={{ justifyContent: "center" }}>
-            <button className="btn primary" onClick={resetForm}>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button
+              onClick={resetForm}
+              className="bg-blue-700 text-white px-6 py-3 rounded-lg font-bold"
+            >
               Start New NCR
             </button>
-            <button className="btn dark" onClick={openDashboard}>
+
+            <button
+              onClick={() => {
+                setSubmittedNcr("");
+                setView("dashboard");
+              }}
+              className="bg-slate-800 text-white px-6 py-3 rounded-lg font-bold"
+            >
               View Dashboard
             </button>
           </div>
@@ -371,42 +329,103 @@ function App() {
     );
   }
 
+
+
+  const filteredNcrs = ncrs.filter((ncr) => {
+    const matchesSearch =
+      !searchTerm ||
+      ncr.ncr_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      ncr.department?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      ncr.assigned_to?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      ncr.issue_area?.toLowerCase().includes(searchTerm.toLowerCase());
+
+    const matchesStatus =
+      statusFilter === "All" || ncr.status === statusFilter;
+
+    const matchesArea =
+      areaFilter === "All" || ncr.issue_area === areaFilter;
+
+    return matchesSearch && matchesStatus && matchesArea;
+  });
+
+
   return (
-    <>
-      <header className="app-header no-print">
-        <h1>Humphrey Products of Winnipeg Ltd.</h1>
-        <p>Non-Conformance Report System</p>
+    <div className="min-h-screen bg-slate-100">
+      <style>
+        {`
+          @media print {
+            body { background: white !important; }
+            header, .no-print { display: none !important; }
+            .print-area {
+              display: block !important;
+              box-shadow: none !important;
+              border: none !important;
+              padding: 0 !important;
+              margin: 0 !important;
+            }
+            img { max-width: 100%; break-inside: avoid; }
+          }
+
+          @media screen {
+            .print-only { display: none; }
+          }
+
+          @media print {
+            .print-only { display: block; }
+          }
+        `}
+      </style>
+      <header className="bg-slate-950 text-white px-8 py-5 no-print">
+        <h1 className="text-2xl font-bold">
+          Humphrey Products of Winnipeg Ltd.
+        </h1>
+        <p className="text-slate-300">Non-Conformance Report System - PRINT FIX LIVE</p>
       </header>
 
-      <main className="app-main">
-        <div className="nav-buttons no-print">
-          <button className={view === "form" ? "btn primary" : "btn"} onClick={openForm}>
+      <main className="p-6 max-w-6xl mx-auto">
+        <div className="flex gap-4 mb-6 no-print">
+          <button
+            onClick={() => { setSelectedNcr(null); setView("form"); }}
+            className={`px-6 py-3 rounded-xl font-bold ${
+              view === "form" ? "bg-blue-700 text-white" : "bg-white border"
+            }`}
+          >
             Start New NCR
           </button>
-          <button className={view === "dashboard" ? "btn primary" : "btn"} onClick={openDashboard}>
+
+          <button
+            onClick={() => { setSelectedNcr(null); setView("dashboard"); }}
+            className={`px-6 py-3 rounded-xl font-bold ${
+              view === "dashboard" ? "bg-blue-700 text-white" : "bg-white border"
+            }`}
+          >
             View NCR Dashboard
           </button>
         </div>
 
-        {lastError && <div className="error-box no-print">{lastError}</div>}
-
         {view === "form" && (
-          <div className="card">
-            <h2 className="card-title">Start New NCR</h2>
-            <p className="card-subtitle">Complete the form below. NCR number is created automatically.</p>
+          <div className="bg-white rounded-2xl shadow-lg p-6">
+            <h2 className="text-2xl font-bold mb-1">Start New NCR</h2>
+            <p className="text-gray-600 mb-6">
+              Complete the form below. NCR number is created automatically.
+            </p>
 
-            <section className="section">
-              <h3>1. Select Area</h3>
-              <div className="area-grid">
+            <section className="mb-8">
+              <h3 className="text-lg font-bold mb-3">1. Select Area</h3>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {Object.keys(issueOptions).map((area) => (
                   <button
                     key={area}
-                    type="button"
-                    className={selectedArea === area ? "area-button selected" : "area-button"}
                     onClick={() => {
                       setSelectedArea(area);
                       setSelectedIssues([]);
                     }}
+                    className={`border rounded-xl p-6 text-lg font-bold ${
+                      selectedArea === area
+                        ? "bg-blue-700 text-white border-blue-700"
+                        : "bg-white hover:bg-slate-50"
+                    }`}
                   >
                     {area}
                   </button>
@@ -415,15 +434,22 @@ function App() {
             </section>
 
             {selectedArea && (
-              <section className="section">
-                <h3>2. What went wrong? — {selectedArea}</h3>
-                <div className="issue-grid">
+              <section className="mb-8">
+                <h3 className="text-lg font-bold mb-3">
+                  2. What went wrong? — {selectedArea}
+                </h3>
+
+                <div className="grid md:grid-cols-2 gap-3">
                   {issueOptions[selectedArea].map((issue) => (
-                    <label key={issue} className="issue-label">
+                    <label
+                      key={issue}
+                      className="border rounded-lg p-3 flex gap-3 items-center"
+                    >
                       <input
                         type="checkbox"
                         checked={selectedIssues.includes(issue)}
                         onChange={() => toggleIssue(issue)}
+                        className="w-5 h-5"
                       />
                       <span>{issue}</span>
                     </label>
@@ -432,55 +458,75 @@ function App() {
               </section>
             )}
 
-            <section className="section">
-              <h3>3. Job Information</h3>
-              <div className="form-grid">
+            <section className="mb-8">
+              <h3 className="text-lg font-bold mb-3">3. Job Information</h3>
+
+              <div className="grid md:grid-cols-4 gap-4">
                 <input
-                  className="field"
                   type="date"
                   value={formData.date_issue_occurred}
-                  onChange={(event) => updateField("date_issue_occurred", event.target.value)}
+                  onChange={(e) =>
+                    updateField("date_issue_occurred", e.target.value)
+                  }
+                  className="border rounded-lg p-3"
                 />
+
                 <input
-                  className="field"
                   placeholder="Department"
                   value={formData.department}
-                  onChange={(event) => updateField("department", event.target.value)}
+                  onChange={(e) => updateField("department", e.target.value)}
+                  className="border rounded-lg p-3"
                 />
+
                 <input
-                  className="field"
                   placeholder="Job / Order #"
                   value={formData.job_order_number}
-                  onChange={(event) => updateField("job_order_number", event.target.value)}
+                  onChange={(e) =>
+                    updateField("job_order_number", e.target.value)
+                  }
+                  className="border rounded-lg p-3"
                 />
+
                 <input
-                  className="field"
-                  type="number"
                   placeholder="Qty Affected"
+                  type="number"
                   value={formData.qty_affected}
-                  onChange={(event) => updateField("qty_affected", event.target.value)}
+                  onChange={(e) => updateField("qty_affected", e.target.value)}
+                  className="border rounded-lg p-3"
                 />
+
                 <input
-                  className="field"
                   placeholder="Production Area"
                   value={formData.production_area}
-                  onChange={(event) => updateField("production_area", event.target.value)}
+                  onChange={(e) =>
+                    updateField("production_area", e.target.value)
+                  }
+                  className="border rounded-lg p-3"
                 />
-                <input className="field" value="Day" disabled />
+
+                <input
+                  value="Day"
+                  disabled
+                  className="border rounded-lg p-3 bg-gray-100"
+                />
+
                 <select
-                  className="field"
                   value={formData.disposition}
-                  onChange={(event) => updateField("disposition", event.target.value)}
+                  onChange={(e) => updateField("disposition", e.target.value)}
+                  className="border rounded-lg p-3"
                 >
                   <option value="">Disposition</option>
                   <option value="Rework">Rework</option>
                   <option value="Scrap">Scrap</option>
                   <option value="Use As Is">Use As Is</option>
                 </select>
+
                 <select
-                  className="field"
                   value={formData.qc_verification}
-                  onChange={(event) => updateField("qc_verification", event.target.value)}
+                  onChange={(e) =>
+                    updateField("qc_verification", e.target.value)
+                  }
+                  className="border rounded-lg p-3"
                 >
                   <option value="">QC Verification</option>
                   <option value="Accepted">Accepted</option>
@@ -490,34 +536,36 @@ function App() {
               </div>
             </section>
 
-            <section className="section two-grid">
+            <section className="mb-8 grid md:grid-cols-2 gap-4">
               <div>
-                <h3>4. Description</h3>
+                <h3 className="text-lg font-bold mb-3">4. Description</h3>
                 <textarea
-                  className="field"
-                  placeholder="Describe the issue..."
                   value={formData.description}
-                  onChange={(event) => updateField("description", event.target.value)}
+                  onChange={(e) => updateField("description", e.target.value)}
+                  placeholder="Describe the issue..."
+                  className="border rounded-lg p-3 w-full h-36"
                 />
               </div>
+
               <div>
-                <h3>5. Action Taken</h3>
+                <h3 className="text-lg font-bold mb-3">5. Action Taken</h3>
                 <textarea
-                  className="field"
-                  placeholder="Describe action taken..."
                   value={formData.action_taken}
-                  onChange={(event) => updateField("action_taken", event.target.value)}
+                  onChange={(e) => updateField("action_taken", e.target.value)}
+                  placeholder="Describe action taken..."
+                  className="border rounded-lg p-3 w-full h-36"
                 />
               </div>
             </section>
 
-            <section className="section">
-              <h3>6. Follow-Up</h3>
-              <div className="two-grid">
+            <section className="mb-8">
+              <h3 className="text-lg font-bold mb-3">6. Follow-Up</h3>
+
+              <div className="grid md:grid-cols-2 gap-4">
                 <select
-                  className="field"
                   value={formData.assigned_to}
-                  onChange={(event) => updateField("assigned_to", event.target.value)}
+                  onChange={(e) => updateField("assigned_to", e.target.value)}
+                  className="border rounded-lg p-3"
                 >
                   <option value="">Assigned To</option>
                   <option value="Matthew">Matthew</option>
@@ -526,31 +574,38 @@ function App() {
                   <option value="John">John</option>
                   <option value="Evan">Evan</option>
                 </select>
+
                 <input
-                  className="field"
                   type="date"
                   value={formData.follow_up_date}
-                  onChange={(event) => updateField("follow_up_date", event.target.value)}
+                  onChange={(e) => updateField("follow_up_date", e.target.value)}
+                  className="border rounded-lg p-3"
                 />
               </div>
             </section>
 
-            <section className="section">
-              <h3>7. Photos</h3>
+            <section className="mb-8">
+              <h3 className="text-lg font-bold mb-3">7. Photos</h3>
+
               <input
-                className="field"
                 type="file"
                 multiple
                 accept=".jpg,.jpeg,.png,.heic,.heif,.webp"
-                onChange={(event) =>
-                  setPhotos((current) => [...current, ...Array.from(event.target.files || [])])
+                onChange={(e) =>
+                  setPhotos((current) => [
+                    ...current,
+                    ...Array.from(e.target.files || []),
+                  ])
                 }
+                className="border rounded-lg p-3 w-full"
               />
 
               {photos.length > 0 && (
-                <div className="help-text">
-                  <p>{photos.length} photo(s) selected.</p>
-                  <ul>
+                <div className="text-sm text-gray-600 mt-2">
+                  <p>
+                    {photos.length} photo(s) selected. You can add more photos without replacing the selected ones.
+                  </p>
+                  <ul className="list-disc ml-5 mt-2">
                     {photos.map((photo, index) => (
                       <li key={`${photo.name}-${index}`}>{photo.name}</li>
                     ))}
@@ -559,45 +614,54 @@ function App() {
               )}
             </section>
 
-            <div className="submit-row">
-              <button
-                className="btn green full-width"
-                type="button"
-                disabled={submitting}
-                onClick={submitNcr}
-              >
-                {submitting ? "Submitting..." : "Submit NCR"}
-              </button>
-            </div>
+            <button
+              onClick={submitNcr}
+              disabled={submitting}
+              className="w-full bg-green-700 text-white py-4 rounded-xl text-xl font-bold hover:bg-green-800 disabled:bg-gray-400"
+            >
+              {submitting ? "Submitting..." : "Submit NCR"}
+            </button>
           </div>
         )}
 
         {view === "dashboard" && !selectedNcr && (
-          <div className="card">
-            <div className="ncr-detail-header">
-              <div>
-                <h2 className="card-title">NCR Dashboard</h2>
-                <p className="card-subtitle">Click any row to open a full NCR.</p>
-              </div>
-              <button className="btn dark no-print" type="button" onClick={loadNcrs}>
+          <div className="bg-white rounded-2xl shadow-lg p-6 overflow-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold">NCR Dashboard</h2>
+
+              <button
+                onClick={loadNcrs}
+                className="bg-slate-800 text-white px-4 py-2 rounded-lg"
+              >
                 Refresh
               </button>
             </div>
 
-            <div className="dashboard-tools no-print">
+            <div className="grid md:grid-cols-3 gap-4 mb-6">
               <input
-                className="field"
-                placeholder="Search NCR #, department, assigned to, job #..."
+                type="text"
+                placeholder="Search NCR #, department, assigned to..."
                 value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="border rounded-lg p-3"
               />
-              <select className="field" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="border rounded-lg p-3"
+              >
                 <option value="All">All Statuses</option>
                 <option value="Open">Open</option>
                 <option value="In Review">In Review</option>
                 <option value="Closed">Closed</option>
               </select>
-              <select className="field" value={areaFilter} onChange={(event) => setAreaFilter(event.target.value)}>
+
+              <select
+                value={areaFilter}
+                onChange={(e) => setAreaFilter(e.target.value)}
+                className="border rounded-lg p-3"
+              >
                 <option value="All">All Areas</option>
                 <option value="Windows">Windows</option>
                 <option value="Doors">Doors</option>
@@ -609,127 +673,175 @@ function App() {
             {loadingNcrs ? (
               <p>Loading NCRs...</p>
             ) : (
-              <div className="table-wrap">
-                <table className="ncr-table">
-                  <thead>
-                    <tr>
-                      <th>NCR #</th>
-                      <th>Area</th>
-                      <th>Department</th>
-                      <th>Disposition</th>
-                      <th>Assigned To</th>
-                      <th>Status</th>
-                      <th>Photos</th>
-                      <th>Created</th>
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-slate-100 text-left">
+                    <th className="p-3 border">NCR #</th>
+                    <th className="p-3 border">Area</th>
+                    <th className="p-3 border">Department</th>
+                    <th className="p-3 border">Disposition</th>
+                    <th className="p-3 border">Assigned To</th>
+                    <th className="p-3 border">Status</th>
+                    <th className="p-3 border">Photos</th>
+                    <th className="p-3 border">Date</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {filteredNcrs.map((ncr) => (
+                    <tr
+                      key={ncr.id}
+                      onClick={() => setSelectedNcr(ncr)}
+                      className="hover:bg-blue-50 cursor-pointer"
+                    >
+                      <td className="p-3 border font-bold">{ncr.ncr_number}</td>
+                      <td className="p-3 border">{ncr.issue_area}</td>
+                      <td className="p-3 border">{ncr.department}</td>
+                      <td className="p-3 border">{ncr.disposition}</td>
+                      <td className="p-3 border">{ncr.assigned_to}</td>
+                      <td className="p-3 border">{ncr.status}</td>
+                      <td className="p-3 border">{ncr.photo_urls?.length || 0}</td>
+                      <td className="p-3 border">
+                        {ncr.created_at
+                          ? new Date(ncr.created_at).toLocaleDateString()
+                          : ""}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {filteredNcrs.map((ncr) => (
-                      <tr
-                        key={ncr.id}
-                        onClick={() => {
-                          setSelectedNcr(ncr);
-                          setIsEditing(false);
-                        }}
-                      >
-                        <td><strong>{ncr.ncr_number || "—"}</strong></td>
-                        <td>{ncr.issue_area || "—"}</td>
-                        <td>{ncr.department || "—"}</td>
-                        <td>{ncr.disposition || "—"}</td>
-                        <td>{ncr.assigned_to || "—"}</td>
-                        <td>{ncr.status || "—"}</td>
-                        <td>{normalizeArray(ncr.photo_urls).length}</td>
-                        <td>{formatDate(ncr.created_at)}</td>
-                      </tr>
-                    ))}
-                    {filteredNcrs.length === 0 && (
-                      <tr>
-                        <td colSpan="8">No NCRs found.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         )}
 
         {view === "dashboard" && selectedNcr && (
-          <div className="card ncr-detail">
-            <div className="ncr-detail-header">
+         <div id="printable-ncr" className="bg-white rounded-2xl shadow-lg p-6 print-area">
+            <div className="print-only text-center mb-6">
+              <h1 className="text-2xl font-bold">HUMPHREY PRODUCTS OF WINNIPEG LTD.</h1>
+              <h2 className="text-xl font-bold">NON-CONFORMANCE REPORT</h2>
+              <p>Windows • Doors • Sealed Units Production</p>
+              <p className="mt-3 text-sm">
+                All NCRs must be completed clearly and submitted the same day the issue is reported.
+              </p>
+              <hr className="my-4" />
+            </div>
+            <div className="flex items-center justify-between mb-6">
               <div>
-                <h2 className="ncr-number">{selectedNcr.ncr_number || "NCR"}</h2>
-                <p className="ncr-meta">
-                  {selectedNcr.issue_area || "—"} • {selectedNcr.status || "—"}
+                <h2 className="text-3xl font-bold">{selectedNcr.ncr_number}</h2>
+                <p className="text-gray-600">
+                  {selectedNcr.issue_area} • {selectedNcr.status}
                 </p>
               </div>
 
-              <div className="ncr-actions no-print">
-                {!isEditing && (
-                  <button className="btn primary" type="button" onClick={startEditing}>
-                    Edit NCR
-                  </button>
-                )}
-                <button className="btn purple" type="button" onClick={printSelectedNcr}>
-                  Print NCR
-                </button>
+              <div className="flex gap-3 no-print">
+              {!isEditing && (
                 <button
-                  className="btn dark"
-                  type="button"
-                  onClick={() => {
-                    setSelectedNcr(null);
-                    setIsEditing(false);
-                    setEditData({});
-                  }}
+                  onClick={startEditing}
+                  className="bg-blue-700 text-white px-5 py-3 rounded-lg font-bold"
                 >
-                  Back to Dashboard
+                  Edit NCR
                 </button>
-              </div>
+              )}
+
+              {isEditing && (
+                <>
+                  <button
+                    onClick={saveNcrChanges}
+                    className="bg-green-700 text-white px-5 py-3 rounded-lg font-bold"
+                  >
+                    Save Changes
+                  </button>
+
+                  <button
+                    onClick={() => setIsEditing(false)}
+                    className="bg-gray-500 text-white px-5 py-3 rounded-lg font-bold"
+                  >
+                    Cancel
+                  </button>
+                </>
+              )}
+
+              <button
+                onClick={printSelectedNcr}
+                className="bg-purple-700 text-white px-5 py-3 rounded-lg font-bold"
+              >
+                Print NCR
+              </button>
+
+              <button
+                onClick={() => {
+                  setSelectedNcr(null);
+                  setIsEditing(false);
+                }}
+                className="bg-slate-800 text-white px-5 py-3 rounded-lg font-bold"
+              >
+                Back to Dashboard
+              </button>
+            </div>
             </div>
 
+            <div className="grid md:grid-cols-4 gap-4 mb-6">
+              <div className="border rounded-lg p-3 bg-slate-50"><p className="text-xs uppercase text-slate-500 font-bold">Department</p><p className="font-semibold">{selectedNcr.department || "—"}</p></div>
+              <div className="border rounded-lg p-3 bg-slate-50"><p className="text-xs uppercase text-slate-500 font-bold">Job / Order #</p><p className="font-semibold">{selectedNcr.job_order_number || "—"}</p></div>
+              <div className="border rounded-lg p-3 bg-slate-50"><p className="text-xs uppercase text-slate-500 font-bold">Production Area</p><p className="font-semibold">{selectedNcr.production_area || "—"}</p></div>
+              <div className="border rounded-lg p-3 bg-slate-50"><p className="text-xs uppercase text-slate-500 font-bold">Qty Affected</p><p className="font-semibold">{selectedNcr.qty_affected || "—"}</p></div>
+              <div className="border rounded-lg p-3 bg-slate-50"><p className="text-xs uppercase text-slate-500 font-bold">Disposition</p><p className="font-semibold">{selectedNcr.disposition || "—"}</p></div>
+              <div className="border rounded-lg p-3 bg-slate-50"><p className="text-xs uppercase text-slate-500 font-bold">Assigned To</p><p className="font-semibold">{selectedNcr.assigned_to || "—"}</p></div>
+              <div className="border rounded-lg p-3 bg-slate-50"><p className="text-xs uppercase text-slate-500 font-bold">Follow-Up Date</p><p className="font-semibold">{selectedNcr.follow_up_date || "—"}</p></div>
+              <div className="border rounded-lg p-3 bg-slate-50"><p className="text-xs uppercase text-slate-500 font-bold">QC Verification</p><p className="font-semibold">{selectedNcr.qc_verification || "—"}</p></div>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6 mb-6">
+              
             {isEditing && (
-              <div className="edit-box no-print">
-                <h3>Edit NCR</h3>
-                <div className="form-grid">
+              <div className="border rounded-xl p-5 mb-6 bg-blue-50">
+                <h3 className="font-bold text-xl mb-4">Edit NCR</h3>
+
+                <div className="grid md:grid-cols-2 gap-4">
                   <input
-                    className="field"
                     value={editData.department || ""}
-                    onChange={(event) => updateEditField("department", event.target.value)}
+                    onChange={(e) => updateEditField("department", e.target.value)}
                     placeholder="Department"
+                    className="border rounded-lg p-3"
                   />
+
                   <input
-                    className="field"
                     value={editData.job_order_number || ""}
-                    onChange={(event) => updateEditField("job_order_number", event.target.value)}
+                    onChange={(e) => updateEditField("job_order_number", e.target.value)}
                     placeholder="Job / Order #"
+                    className="border rounded-lg p-3"
                   />
+
                   <input
-                    className="field"
                     value={editData.production_area || ""}
-                    onChange={(event) => updateEditField("production_area", event.target.value)}
+                    onChange={(e) => updateEditField("production_area", e.target.value)}
                     placeholder="Production Area"
+                    className="border rounded-lg p-3"
                   />
+
                   <input
-                    className="field"
                     type="number"
                     value={editData.qty_affected || ""}
-                    onChange={(event) => updateEditField("qty_affected", event.target.value)}
+                    onChange={(e) => updateEditField("qty_affected", e.target.value)}
                     placeholder="Qty Affected"
+                    className="border rounded-lg p-3"
                   />
+
                   <select
-                    className="field"
                     value={editData.disposition || ""}
-                    onChange={(event) => updateEditField("disposition", event.target.value)}
+                    onChange={(e) => updateEditField("disposition", e.target.value)}
+                    className="border rounded-lg p-3"
                   >
                     <option value="">Disposition</option>
                     <option value="Rework">Rework</option>
                     <option value="Scrap">Scrap</option>
                     <option value="Use As Is">Use As Is</option>
                   </select>
+
                   <select
-                    className="field"
                     value={editData.assigned_to || ""}
-                    onChange={(event) => updateEditField("assigned_to", event.target.value)}
+                    onChange={(e) => updateEditField("assigned_to", e.target.value)}
+                    className="border rounded-lg p-3"
                   >
                     <option value="">Assigned To</option>
                     <option value="Matthew">Matthew</option>
@@ -738,131 +850,93 @@ function App() {
                     <option value="John">John</option>
                     <option value="Evan">Evan</option>
                   </select>
+
                   <input
-                    className="field"
                     type="date"
                     value={editData.follow_up_date || ""}
-                    onChange={(event) => updateEditField("follow_up_date", event.target.value)}
+                    onChange={(e) => updateEditField("follow_up_date", e.target.value)}
+                    className="border rounded-lg p-3"
                   />
+
                   <select
-                    className="field"
                     value={editData.qc_verification || ""}
-                    onChange={(event) => updateEditField("qc_verification", event.target.value)}
+                    onChange={(e) => updateEditField("qc_verification", e.target.value)}
+                    className="border rounded-lg p-3"
                   >
                     <option value="">QC Verification</option>
                     <option value="Accepted">Accepted</option>
                     <option value="Rejected">Rejected</option>
                     <option value="More Work Required">More Work Required</option>
                   </select>
-                  <select
-                    className="field"
-                    value={editData.status || "Open"}
-                    onChange={(event) => updateEditField("status", event.target.value)}
-                  >
-                    <option value="Open">Open</option>
-                    <option value="In Review">In Review</option>
-                    <option value="Closed">Closed</option>
-                  </select>
                 </div>
 
-                <div className="two-grid" style={{ marginTop: 14 }}>
+                <div className="grid md:grid-cols-2 gap-4 mt-4">
                   <textarea
-                    className="field"
                     value={editData.description || ""}
-                    onChange={(event) => updateEditField("description", event.target.value)}
+                    onChange={(e) => updateEditField("description", e.target.value)}
                     placeholder="Description"
+                    className="border rounded-lg p-3 h-32"
                   />
-                  <textarea
-                    className="field"
-                    value={editData.action_taken || ""}
-                    onChange={(event) => updateEditField("action_taken", event.target.value)}
-                    placeholder="Action Taken"
-                  />
-                </div>
 
-                <div className="nav-buttons" style={{ marginTop: 14, marginBottom: 0 }}>
-                  <button className="btn green" type="button" onClick={saveNcrChanges}>
-                    Save Changes
-                  </button>
-                  <button className="btn" type="button" onClick={() => setIsEditing(false)}>
-                    Cancel
-                  </button>
+                  <textarea
+                    value={editData.action_taken || ""}
+                    onChange={(e) => updateEditField("action_taken", e.target.value)}
+                    placeholder="Action Taken"
+                    className="border rounded-lg p-3 h-32"
+                  />
                 </div>
               </div>
             )}
 
-            <div className="info-grid">
-              <InfoBox label="Department" value={selectedNcr.department} />
-              <InfoBox label="Job / Order #" value={selectedNcr.job_order_number} />
-              <InfoBox label="Production Area" value={selectedNcr.production_area} />
-              <InfoBox label="Qty Affected" value={selectedNcr.qty_affected} />
-              <InfoBox label="Disposition" value={selectedNcr.disposition} />
-              <InfoBox label="Assigned To" value={selectedNcr.assigned_to} />
-              <InfoBox label="Follow-Up Date" value={formatDate(selectedNcr.follow_up_date)} />
-              <InfoBox label="QC Verification" value={selectedNcr.qc_verification} />
-            </div>
-
-            <div className="two-grid section">
-              <div className="panel">
-                <h3>Issues Selected</h3>
-                <div className="badges">
-                  {normalizeArray(selectedNcr.issue_types).length > 0 ? (
-                    normalizeArray(selectedNcr.issue_types).map((issue) => (
-                      <span key={issue} className="badge">
-                        {issue}
-                      </span>
-                    ))
-                  ) : (
-                    <p>—</p>
-                  )}
+<div className="border rounded-xl p-5">
+                <h3 className="font-bold text-lg mb-3">Issues Selected</h3>
+                <div className="flex flex-wrap gap-2">
+                  {selectedNcr.issue_types?.map((issue) => (
+                    <span key={issue} className="bg-blue-100 text-blue-900 px-3 py-1 rounded-full text-sm font-semibold">
+                      {issue}
+                    </span>
+                  ))}
                 </div>
               </div>
 
-              <div className="panel">
-                <h3>Dates</h3>
-                <p><strong>Reported:</strong> {formatDate(selectedNcr.date_reported)}</p>
-                <p><strong>Issue Occurred:</strong> {formatDate(selectedNcr.date_issue_occurred)}</p>
+              <div className="border rounded-xl p-5">
+                <h3 className="font-bold text-lg mb-3">Dates</h3>
+                <p><strong>Reported:</strong> {selectedNcr.date_reported || "—"}</p>
+                <p><strong>Issue Occurred:</strong> {selectedNcr.date_issue_occurred || "—"}</p>
               </div>
             </div>
 
-            <div className="two-grid section">
-              <div className="panel">
-                <h3>Description</h3>
-                <p>{selectedNcr.description || "—"}</p>
+            <div className="grid md:grid-cols-2 gap-6 mb-6">
+              <div className="border rounded-xl p-5">
+                <h3 className="font-bold text-lg mb-3">Description</h3>
+                <p className="whitespace-pre-wrap">{selectedNcr.description || "—"}</p>
               </div>
-              <div className="panel">
-                <h3>Action Taken</h3>
-                <p>{selectedNcr.action_taken || "—"}</p>
+
+              <div className="border rounded-xl p-5">
+                <h3 className="font-bold text-lg mb-3">Action Taken</h3>
+                <p className="whitespace-pre-wrap">{selectedNcr.action_taken || "—"}</p>
               </div>
             </div>
 
-            <div className="panel section">
-              <h3>Photos</h3>
-              {normalizeArray(selectedNcr.photo_urls).length > 0 ? (
-                <div className="photo-grid">
-                  {normalizeArray(selectedNcr.photo_urls).map((url, index) => (
-                    <a key={url} className="photo-card" href={url} target="_blank" rel="noreferrer">
-                      <img src={url} alt={`NCR photo ${index + 1}`} />
-                      <div>View Photo {index + 1}</div>
+            <div className="border rounded-xl p-5">
+              <h3 className="font-bold text-lg mb-4">Photos</h3>
+              {selectedNcr.photo_urls?.length > 0 ? (
+                <div className="grid md:grid-cols-3 gap-4">
+                  {selectedNcr.photo_urls.map((url, index) => (
+                    <a key={url} href={url} target="_blank" rel="noreferrer" className="block border rounded-xl overflow-hidden hover:shadow-lg">
+                      <img src={url} alt={`NCR photo ${index + 1}`} className="w-full h-48 object-cover" />
+                      <div className="p-3 font-semibold text-sm">View Photo {index + 1}</div>
                     </a>
                   ))}
                 </div>
               ) : (
-                <p className="small-note">No photos uploaded.</p>
+                <p className="text-gray-500">No photos uploaded.</p>
               )}
             </div>
           </div>
         )}
-      </main>
-    </>
-  );
-}
 
-function InfoBox({ label, value }) {
-  return (
-    <div className="info-box">
-      <div className="info-label">{label}</div>
-      <div className="info-value">{value || value === 0 ? value : "—"}</div>
+      </main>
     </div>
   );
 }
